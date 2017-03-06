@@ -23,7 +23,7 @@
 #ifndef CS_MONGOOSE_SRC_COMMON_H_
 #define CS_MONGOOSE_SRC_COMMON_H_
 
-#define MG_VERSION "6.6"
+#define MG_VERSION "6.7"
 
 /* Local tweaks, applied before any of Mongoose's own headers. */
 #ifdef MG_LOCALS
@@ -57,7 +57,8 @@
 #define CS_P_NRF51 12
 #define CS_P_NRF52 10
 #define CS_P_PIC32 11
-/* Next id: 16 */
+#define CS_P_STM32 16
+/* Next id: 17 */
 
 /* If not specified explicitly, we guess platform by defines. */
 #ifndef CS_PLATFORM
@@ -87,6 +88,8 @@
 #elif defined(TARGET_IS_TM4C129_RA0) || defined(TARGET_IS_TM4C129_RA1) || \
     defined(TARGET_IS_TM4C129_RA2)
 #define CS_PLATFORM CS_P_TM4C129
+#elif defined(STM32)
+#define CS_PLATFORM CS_P_STM32
 #endif
 
 #ifndef CS_PLATFORM
@@ -117,6 +120,7 @@
 /* Amalgamated: #include "common/platforms/platform_nxp_lpc.h" */
 /* Amalgamated: #include "common/platforms/platform_nxp_kinetis.h" */
 /* Amalgamated: #include "common/platforms/platform_pic32.h" */
+/* Amalgamated: #include "common/platforms/platform_stm32.h" */
 
 /* Common stuff */
 
@@ -270,6 +274,7 @@ typedef struct _stati64 cs_stat_t;
 #define S_ISREG(x) (((x) &_S_IFMT) == _S_IFREG)
 #endif
 #define DIRSEP '\\'
+#define CS_DEFINE_DIRENT
 
 #ifndef va_copy
 #ifdef __va_copy
@@ -470,6 +475,7 @@ typedef struct stat cs_stat_t;
 
 #include <assert.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <machine/endian.h>
@@ -523,6 +529,8 @@ typedef struct stat cs_stat_t;
 #define SIZE_T_FMT "u"
 typedef struct stat cs_stat_t;
 #define DIRSEP '/'
+#define CS_DEFINE_DIRENT
+
 #define to64(x) strtoll(x, NULL, 10)
 #define INT64_FMT PRId64
 #define INT64_X_FMT PRIx64
@@ -703,22 +711,6 @@ int _stat(const char *pathname, struct stat *st);
 
 #endif /* __TI_COMPILER_VERSION__ */
 
-#ifdef CC3200_FS_SPIFFS
-#include <common/spiffs/spiffs.h>
-
-typedef struct {
-  spiffs_DIR dh;
-  struct spiffs_dirent de;
-} DIR;
-
-#define d_name name
-#define dirent spiffs_dirent
-
-DIR *opendir(const char *dir_name);
-int closedir(DIR *dir);
-struct dirent *readdir(DIR *dir);
-#endif /* CC3200_FS_SPIFFS */
-
 #ifdef CC3200_FS_SLFS
 #define MG_FS_SLFS
 #endif
@@ -726,6 +718,7 @@ struct dirent *readdir(DIR *dir);
 #if (defined(CC3200_FS_SPIFFS) || defined(CC3200_FS_SLFS)) && \
     !defined(MG_ENABLE_FILESYSTEM)
 #define MG_ENABLE_FILESYSTEM 1
+#define CS_DEFINE_DIRENT
 #endif
 
 #ifndef CS_ENABLE_STDIO
@@ -1297,6 +1290,7 @@ typedef uint32_t in_addr_t;
 #define SIZE_T_FMT "u"
 
 #define DIRSEP '\\'
+#define CS_DEFINE_DIRENT
 
 #ifndef va_copy
 #ifdef __va_copy
@@ -1517,6 +1511,47 @@ char* inet_ntoa(struct in_addr in);
 
 #endif /* CS_COMMON_PLATFORMS_PLATFORM_PIC32_H_ */
 #ifdef MG_MODULE_LINES
+#line 1 "common/platforms/platform_stm32.h"
+#endif
+/*
+ * Copyright (c) 2014-2016 Cesanta Software Limited
+ * All rights reserved
+ */
+
+#ifndef CS_COMMON_PLATFORMS_PLATFORM_STM32_H_
+#define CS_COMMON_PLATFORMS_PLATFORM_STM32_H_
+#if CS_PLATFORM == CS_P_STM32
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <stdint.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <errno.h>
+#include <memory.h>
+#include <fcntl.h>
+#include <stm32_sdk_hal.h>
+
+#define to64(x) strtoll(x, NULL, 10)
+#define INT64_FMT PRId64
+#define SIZE_T_FMT "u"
+typedef struct stat cs_stat_t;
+#define DIRSEP '/'
+
+#ifndef CS_ENABLE_STDIO
+#define CS_ENABLE_STDIO 1
+#endif
+
+#ifndef MG_ENABLE_FILESYSTEM
+#define MG_ENABLE_FILESYSTEM 1
+#endif
+
+#define CS_DEFINE_DIRENT
+
+#endif /* CS_PLATFORM == CS_P_STM32 */
+#endif /* CS_COMMON_PLATFORMS_PLATFORM_STM32_H_ */
+#ifdef MG_MODULE_LINES
 #line 1 "common/platforms/lwip/mg_lwip.h"
 #endif
 /*
@@ -1578,6 +1613,11 @@ struct mg_connection;
 uint32_t mg_lwip_get_poll_delay_ms(struct mg_mgr *mgr);
 void mg_lwip_set_keepalive_params(struct mg_connection *nc, int idle,
                                   int interval, int count);
+#endif
+
+/* For older version of LWIP */
+#ifndef ipX_2_ip
+#define ipX_2_ip(x) (x)
 #endif
 
 #endif /* MG_LWIP */
@@ -3091,6 +3131,9 @@ struct mg_ssl_if_conn_params {
   const char *key;
   const char *ca_cert;
   const char *server_name;
+  const char *cipher_suites;
+  const char *psk_identity;
+  const char *psk_key;
 };
 
 enum mg_ssl_if_result mg_ssl_if_conn_init(
@@ -3247,8 +3290,8 @@ struct mg_connection {
      * void pointers, since some archs might have fat pointers for functions.
      */
     mg_event_handler_t f;
-  } priv_1;       /* Used by mg_enable_multithreading() */
-  void *priv_2;   /* Used by mg_enable_multithreading() */
+  } priv_1;
+  void *priv_2;
   void *mgr_data; /* Implementation-specific event manager's data. */
   struct mg_iface *iface;
   unsigned long flags;
@@ -3410,15 +3453,30 @@ struct mg_bind_opts {
   const char **error_string; /* Placeholder for the error string */
   struct mg_iface *iface;    /* Interface instance */
 #if MG_ENABLE_SSL
-  /* SSL settings. */
-  const char *ssl_cert;    /* Server certificate to present to clients
-                            * Or client certificate to present to tunnel
-                            * dispatcher. */
-  const char *ssl_key;     /* Private key corresponding to the certificate.
-                              If ssl_cert is set but ssl_key is not, ssl_cert
-                              is used. */
-  const char *ssl_ca_cert; /* CA bundle used to verify client certificates or
-                            * tunnel dispatchers. */
+  /*
+   * SSL settings.
+   *
+   * Server certificate to present to clients or client certificate to
+   * present to tunnel dispatcher (for tunneled connections).
+   */
+  const char *ssl_cert;
+  /* Private key corresponding to the certificate. If ssl_cert is set but
+   * ssl_key is not, ssl_cert is used. */
+  const char *ssl_key;
+  /* CA bundle used to verify client certificates or tunnel dispatchers. */
+  const char *ssl_ca_cert;
+  /* Colon-delimited list of acceptable cipher suites.
+   * Names depend on the library used, for example:
+   *
+   * ECDH-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES128-SHA256 (OpenSSL)
+   * TLS-ECDH-ECDSA-WITH-AES-128-GCM-SHA256:TLS-DHE-RSA-WITH-AES-128-GCM-SHA256
+   *   (mbedTLS)
+   *
+   * For OpenSSL the list can be obtained by running "openssl ciphers".
+   * For mbedTLS, names can be found in library/ssl_ciphersuites.c
+   * If NULL, a reasonable default is used.
+   */
+  const char *ssl_cipher_suites;
 #endif
 };
 
@@ -3458,15 +3516,33 @@ struct mg_connect_opts {
   const char **error_string; /* Placeholder for the error string */
   struct mg_iface *iface;    /* Interface instance */
 #if MG_ENABLE_SSL
-  /* SSL settings. */
-  const char *ssl_cert;    /* Client certificate to present to the server */
-  const char *ssl_key;     /* Private key corresponding to the certificate.
-                              If ssl_cert is set but ssl_key is not, ssl_cert
-                              is used. */
-  const char *ssl_ca_cert; /* Verify server certificate using this CA bundle.
-                              If set to "*", then SSL is enabled but no cert
-                              verification is performed. */
-
+  /*
+   * SSL settings.
+   * Client certificate to present to the server.
+   */
+  const char *ssl_cert;
+  /*
+   * Private key corresponding to the certificate.
+   * If ssl_cert is set but ssl_key is not, ssl_cert is used.
+   */
+  const char *ssl_key;
+  /*
+   * Verify server certificate using this CA bundle. If set to "*", then SSL
+   * is enabled but no cert verification is performed.
+   */
+  const char *ssl_ca_cert;
+  /* Colon-delimited list of acceptable cipher suites.
+   * Names depend on the library used, for example:
+   *
+   * ECDH-ECDSA-AES128-GCM-SHA256:DHE-RSA-AES128-SHA256 (OpenSSL)
+   * TLS-ECDH-ECDSA-WITH-AES-128-GCM-SHA256:TLS-DHE-RSA-WITH-AES-128-GCM-SHA256
+   *   (mbedTLS)
+   *
+   * For OpenSSL the list can be obtained by running "openssl ciphers".
+   * For mbedTLS, names can be found in library/ssl_ciphersuites.c
+   * If NULL, a reasonable default is used.
+   */
+  const char *ssl_cipher_suites;
   /*
    * Server name verification. If ssl_ca_cert is set and the certificate has
    * passed verification, its subject will be verified against this string.
@@ -3475,6 +3551,15 @@ struct mg_connect_opts {
    * name verification.
    */
   const char *ssl_server_name;
+  /*
+   * PSK identity and key. Identity is a NUL-terminated string and key is a hex
+   * string. Key must be either 16 or 32 bytes (32 or 64 hex digits) for AES-128
+   * or AES-256 respectively.
+   * Note: Default list of cipher suites does not include PSK suites, if you
+   * want to use PSK you will need to set ssl_cipher_suites as well.
+   */
+  const char *ssl_psk_identity;
+  const char *ssl_psk_key;
 #endif
 };
 
@@ -3624,24 +3709,6 @@ int mg_resolve(const char *domain_name, char *ip_addr_buf, size_t buf_len);
  * Returns -1 if ACL is malformed, 0 if address is disallowed, 1 if allowed.
  */
 int mg_check_ip_acl(const char *acl, uint32_t remote_ip);
-
-/*
- * Optional parameters for mg_enable_multithreading_opt()
- */
-struct mg_multithreading_opts {
-  int poll_timeout; /* Polling interval */
-};
-
-/*
- * Enables multi-threaded handling for the given listening connection `nc`.
- * For each accepted connection, Mongoose will create a separate thread
- * and run an event handler in that thread. Thus, if an event handler is doing
- * a blocking call or some long computation, it will not slow down
- * other connections.
- */
-void mg_enable_multithreading(struct mg_connection *nc);
-void mg_enable_multithreading_opt(struct mg_connection *nc,
-                                  struct mg_multithreading_opts opts);
 
 #if MG_ENABLE_JAVASCRIPT
 /*
@@ -3886,6 +3953,9 @@ void mg_sock_addr_to_str(const union socket_address *sa, char *buf, size_t len,
  * returned length is bigger than `dst_len`, the overflow bytes are discarded.
  */
 int mg_hexdump(const void *buf, int len, char *dst, int dst_len);
+
+/* Same as mg_hexdump, but with output going to file instead of a buffer. */
+void mg_hexdumpf(FILE *fp, const void *buf, int len);
 
 /*
  * Generates human-readable hexdump of the data sent or received by the
